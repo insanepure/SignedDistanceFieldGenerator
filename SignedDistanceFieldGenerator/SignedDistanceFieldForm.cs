@@ -43,6 +43,7 @@ namespace SignedDistanceFieldGenerator
         private int currentJob = 0;
         static readonly object jobLocker = new object();
         private int radius = 0;
+        bool hasAlpha = true;
 
         float maxValue = 0;
         float currentValue = 0;
@@ -73,15 +74,18 @@ namespace SignedDistanceFieldGenerator
             return (value < min) ? min : (value > max) ? max : value;
         }
 
-        private void CopyToImage(ref byte[] pixelArray, ref Bitmap Image)
+        private Bitmap CopyToImage(ref byte[] pixelArray, ref Bitmap Image)
         {
-            BitmapData imageData = Image.LockBits(new Rectangle(0, 0, Image.Width, Image.Height), ImageLockMode.WriteOnly, Image.PixelFormat);
+            Bitmap clone = new Bitmap(Image.Width, Image.Height, System.Drawing.Imaging.PixelFormat.Format32bppPArgb);
+            BitmapData imageData = clone.LockBits(new Rectangle(0, 0, clone.Width, clone.Height), ImageLockMode.WriteOnly, PixelFormat.Format32bppPArgb);
 
             //copy the calculations into the out image
             IntPtr ptrFirstPixel = imageData.Scan0;
             Marshal.Copy(pixelArray, 0, ptrFirstPixel, pixelArray.Length);
 
-            Image.UnlockBits(imageData);
+            clone.UnlockBits(imageData);
+
+            return clone;
         }
 
         private void GeneratePixelArray(ref Bitmap Image, out byte[] pixelArray, bool copy)
@@ -114,12 +118,11 @@ namespace SignedDistanceFieldGenerator
             {
                 for (int x = sx; x < ex; ++x)
                 {
-
                     int idx = (x + (y * jobMaxWidth)) * 4;
+                    Color InPixel = Color.FromArgb(threadPixels[idx + 3], threadPixels[idx], threadPixels[idx + 1], threadPixels[idx + 2]);
 
                     float distance = float.MaxValue;
                     bool IsIn = false;
-                    Color InPixel = Color.FromArgb(threadPixels[idx + 3], threadPixels[idx], threadPixels[idx + 1], threadPixels[idx + 2]);
                     //The Pixel is "In", so we calculate the Distance to the edge
                     if (InPixel == InColor)
                     {
@@ -241,6 +244,7 @@ namespace SignedDistanceFieldGenerator
             {
                 imgPath = readDialog.FileName.ToString();
                 loadedImage = new Bitmap(imgPath);
+                loadedImage = loadedImage.Clone(new Rectangle(0, 0, loadedImage.Width, loadedImage.Height), PixelFormat.Format32bppArgb);
                 //set display
                 imgpath.Text = imgPath;
                 imagebox.Image = loadedImage;
@@ -288,9 +292,9 @@ namespace SignedDistanceFieldGenerator
                         Jobs.Add(job);
                     }
                 }
-                
-                byte[] resultPixels;
-                GeneratePixelArray(ref loadedImage, out resultPixels, false);
+
+                int size = loadedImage.Width * loadedImage.Height * 4;
+                byte[] resultPixels = new byte[size];
 
                 Thread[] threads = new Thread[numCores];
 
@@ -315,9 +319,8 @@ namespace SignedDistanceFieldGenerator
                 }
                 progressBar.Value = 100;
 
-                CopyToImage(ref resultPixels, ref loadedImage);
+                loadedImage = CopyToImage(ref resultPixels, ref loadedImage);
 
-                loadedImage = ResizeImage(loadedImage, (int)OutWidth.Value, (int)OutHeight.Value);
                 //set new image as display image
                 imagebox.Image = loadedImage;
                 progress.Text = "Generation complete.";
@@ -335,7 +338,7 @@ namespace SignedDistanceFieldGenerator
             {
                 if (loadedImage != null && saveDialog.ShowDialog() == DialogResult.OK)
                 {
-                    loadedImage.Save(saveDialog.FileName);
+                    ResizeImage(loadedImage, (int)OutWidth.Value, (int)OutHeight.Value).Save(saveDialog.FileName);
                     MessageBox.Show("Image saved!");
                 }
             }
